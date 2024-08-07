@@ -197,7 +197,8 @@ class WorkspaceTree(QtWidgets.QTreeWidget):
             "r ... print(repr(variable))\n"
             "RETURN/ENTER ... show namespace\n"  # this is done via signal itemActivated
             "BACKSPACE ... switch to parent namespace\n"
-            "DEL ... del variable"
+            "DEL ... del variable\n"
+            "LEFT/RIGHT ... move selection up/down and show variable info"
         )
 
     def keyPressEvent(self, event):
@@ -222,7 +223,34 @@ class WorkspaceTree(QtWidgets.QTreeWidget):
             if key == QtCore.Qt.Key.Key_Backspace:
                 self._proxy.goUp()
                 return
+            if key == QtCore.Qt.Key.Key_Left:
+                self._moveSelectionAndShowHelp("up")
+                return
+            if key == QtCore.Qt.Key.Key_Right:
+                self._moveSelectionAndShowHelp("down")
+                return
         super().keyPressEvent(event)
+
+    def _moveSelectionAndShowHelp(self, direction):
+        currentIndex = self.currentIndex()
+
+        if direction == "up":
+            newIndex = self.indexAbove(currentIndex)
+        else:
+            newIndex = self.indexBelow(currentIndex)
+
+        if newIndex.row() != -1:
+            self.setCurrentIndex(newIndex)
+            item = self.topLevelItem(newIndex.row())
+        else:
+            item = self.topLevelItem(currentIndex.row())
+
+        objectName = joinName(splitName(self._proxy._name) + [item.text(0)])
+
+        # Show help in help tool (if loaded)
+        hw = pyzo.toolManager.getTool("pyzointeractivehelp")
+        if hw:
+            hw.setObjectName(objectName, addToHist=False)
 
     def contextMenuEvent(self, event):
         """Show the context menu."""
@@ -583,7 +611,7 @@ class PyzoWorkspace(QtWidgets.QWidget):
         searchOptions = [
             ("searchMatchCase", True, pyzo.translate("pyzoWorkspace", "Match case")),
             ("searchRegExp", False, pyzo.translate("pyzoWorkspace", "RegExp")),
-            ("searchStartsWith", True, pyzo.translate("pyzoWorkspace", "Starts with ...")),
+            ("searchContains", True, pyzo.translate("pyzoWorkspace", "Contains ...")),
         ]
 
         for name, default, label in searchOptions:
@@ -607,12 +635,12 @@ class PyzoWorkspace(QtWidgets.QWidget):
         if len(needles) == 0:
             regExpList = [r".*"]
         elif self._config.searchRegExp:
-            if self._config.searchStartsWith:
-                needles = [s + ".*" for s in needles]
+            if self._config.searchContains:
+                needles = [".*" + s + ".*" for s in needles]
             regExpList = needles
         else:
-            if self._config.searchStartsWith:
-                needles = [s + "*" for s in needles]
+            if self._config.searchContains:
+                needles = ["*" + s + "*" for s in needles]
             regExpList = [wildcardsToRegExp(s) for s in needles]
 
         pattern = "(?:" + ")|(?:".join(regExpList) + ")"
@@ -629,8 +657,9 @@ class PyzoWorkspace(QtWidgets.QWidget):
     def _updateSearchPlaceHolderText(self):
         # Update
         self._searchText.setPlaceholderText(
-            "[{} mode, case {}]".format(
+            "[{}, case {}{}]".format(
                 "RegExp" if self._config.searchRegExp else "wildcards",
                 "sensitive" if self._config.searchMatchCase else "insensitive",
+                ", contains" if self._config.searchContains else "",
             )
         )
